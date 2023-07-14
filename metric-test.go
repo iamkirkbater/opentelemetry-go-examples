@@ -19,23 +19,35 @@ var res = resource.NewWithAttributes(
 	semconv.ServiceName("runtime-instrumentation-example"),
 )
 
-func main() {
+var metricReader = metricsdk.NewManualReader()
+
+func setup_metrics() func() {
+	provider := metricsdk.NewMeterProvider(metricsdk.WithResource(res), metricsdk.WithReader(metricReader))
+	otel.SetMeterProvider(provider)
+	return func() {
+		err := provider.Shutdown(context.Background())
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func closeout_metrics(ctx context.Context) {
 	exp, err := stdoutmetric.New()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Register the exporter with an SDK via a periodic reader.
-	//read := metricsdk.NewPeriodicReader(exp, metricsdk.WithInterval(1*time.Second))
-	read := metricsdk.NewManualReader()
-	provider := metricsdk.NewMeterProvider(metricsdk.WithResource(res), metricsdk.WithReader(read))
-	defer func() {
-		err := provider.Shutdown(context.Background())
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-	otel.SetMeterProvider(provider)
+	collectedMetrics := &metricdata.ResourceMetrics{}
+	metricReader.Collect(ctx, collectedMetrics)
+	exp.Export(ctx, collectedMetrics)
+}
+
+func main() {
+	ctx := context.TODO()
+
+	shutdown := setup_metrics()
+	defer shutdown()
 
 	log.Print("Starting runtime instrumentation:")
 	m := otel.Meter("my.meter.name")
@@ -46,11 +58,9 @@ func main() {
 		metric.WithUnit("calls"),
 	)
 
-	counter.Add(context.TODO(), 1, metric.WithAttributes(
+	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("cmd", "root")),
 	)
 
-	collectedMetrics := &metricdata.ResourceMetrics{}
-	read.Collect(context.TODO(), collectedMetrics)
-	exp.Export(context.TODO(), collectedMetrics)
+	closeout_metrics(ctx)
 }
