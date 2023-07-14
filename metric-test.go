@@ -22,30 +22,28 @@ var res = resource.NewWithAttributes(
 var metricReader = metricsdk.NewManualReader()
 
 func setup_metrics() func() {
+	ctx := context.TODO()
 	provider := metricsdk.NewMeterProvider(metricsdk.WithResource(res), metricsdk.WithReader(metricReader))
 	otel.SetMeterProvider(provider)
+
 	return func() {
-		err := provider.Shutdown(context.Background())
+		exp, err := stdoutmetric.New()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		collectedMetrics := &metricdata.ResourceMetrics{}
+		metricReader.Collect(ctx, collectedMetrics)
+		exp.Export(ctx, collectedMetrics)
+
+		err = provider.Shutdown(context.Background())
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func closeout_metrics(ctx context.Context) {
-	exp, err := stdoutmetric.New()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	collectedMetrics := &metricdata.ResourceMetrics{}
-	metricReader.Collect(ctx, collectedMetrics)
-	exp.Export(ctx, collectedMetrics)
-}
-
 func main() {
-	ctx := context.TODO()
-
 	shutdown := setup_metrics()
 	defer shutdown()
 
@@ -58,9 +56,7 @@ func main() {
 		metric.WithUnit("calls"),
 	)
 
-	counter.Add(ctx, 1, metric.WithAttributes(
+	counter.Add(context.TODO(), 1, metric.WithAttributes(
 		attribute.String("cmd", "root")),
 	)
-
-	closeout_metrics(ctx)
 }
