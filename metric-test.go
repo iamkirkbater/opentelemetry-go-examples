@@ -6,6 +6,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	oltpmetrichttp "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/metric"
 	metricsdk "go.opentelemetry.io/otel/sdk/metric"
@@ -21,20 +22,32 @@ var res = resource.NewWithAttributes(
 
 var metricReader = metricsdk.NewManualReader()
 
+const COLLECTOR_URL = "localhost:4318"
+
 func setup_metrics() func() {
 	ctx := context.TODO()
 	provider := metricsdk.NewMeterProvider(metricsdk.WithResource(res), metricsdk.WithReader(metricReader))
 	otel.SetMeterProvider(provider)
 
-	return func() {
-		exp, err := stdoutmetric.New()
-		if err != nil {
-			log.Fatal(err)
-		}
+	stdoutExp, err := stdoutmetric.New()
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	secureOpt := oltpmetrichttp.WithInsecure()
+	upstreamExp, err := oltpmetrichttp.New(ctx,
+		secureOpt,
+		oltpmetrichttp.WithEndpoint(COLLECTOR_URL),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return func() {
 		collectedMetrics := &metricdata.ResourceMetrics{}
 		metricReader.Collect(ctx, collectedMetrics)
-		exp.Export(ctx, collectedMetrics)
+		stdoutExp.Export(ctx, collectedMetrics)
+		upstreamExp.Export(ctx, collectedMetrics)
 
 		err = provider.Shutdown(context.Background())
 		if err != nil {
